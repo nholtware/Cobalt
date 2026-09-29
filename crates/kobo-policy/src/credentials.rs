@@ -272,6 +272,9 @@ pub fn allowed_request(
     if app == "lichess" {
         return lichess_credential_allowed(credential, url, usage, body, content_type);
     }
+    if app == "inoreader-client" {
+        return inoreader_credential_allowed(credential, url, usage, body, content_type);
+    }
     if app == "zotero-reader" {
         return usage == CredentialUse::Fetch && zotero_credential_allowed(credential, url);
     }
@@ -425,6 +428,77 @@ fn uci_move(value: &str) -> bool {
         && matches!(bytes[3], b'1'..=b'8')
         && (bytes.len() == 4 || matches!(bytes[4], b'q' | b'r' | b'b' | b'n'))
 }
+
+/// The one write `inoreader-client` makes: tag or untag items as read or starred.
+const INOREADER_EDIT_TAG_URL: &str = "https://www.inoreader.com/reader/api/0/edit-tag";
+const INOREADER_TAG_FIELDS: [&str; 4] = [
+    "a=user/-/state/com.google/read",
+    "r=user/-/state/com.google/read",
+    "a=user/-/state/com.google/starred",
+    "r=user/-/state/com.google/starred",
+];
+
+fn inoreader_credential_allowed(
+    credential: &Credential,
+    url: &str,
+    usage: CredentialUse,
+    body: Option<&str>,
+    content_type: Option<&str>,
+) -> bool {
+    if credential.secret != "inoreader"
+        || credential.header != SecretHeader::Bearer
+        || !has_origin(url, "www.inoreader.com", 443)
+    {
+        return false;
+    }
+    match usage {
+        CredentialUse::Fetch => {
+            body.is_none() && content_type.is_none() && INOREADER_CLIENT_URLS.contains(&url)
+        }
+        CredentialUse::Post => {
+            url == INOREADER_EDIT_TAG_URL
+                && content_type == Some("application/x-www-form-urlencoded")
+                && body.is_some_and(inoreader_edit_body)
+        }
+        CredentialUse::Put | CredentialUse::Patch => false,
+    }
+}
+
+/// `a=`/`r=` one of the two tags, then one to fifty distinct item numbers.
+fn inoreader_edit_body(body: &str) -> bool {
+    if body.len() >= 2048 {
+        return false;
+    }
+    let mut fields = body.split('&');
+    if !fields
+        .next()
+        .is_some_and(|tag| INOREADER_TAG_FIELDS.contains(&tag))
+    {
+        return false;
+    }
+    let mut seen: Vec<&str> = Vec::new();
+    for field in fields {
+        let Some(id) = field.strip_prefix("i=") else {
+            return false;
+        };
+        if !(1..=16).contains(&id.len())
+            || !id.bytes().all(|byte| byte.is_ascii_digit())
+            || id.bytes().all(|byte| byte == b'0')
+            || seen.contains(&id)
+        {
+            return false;
+        }
+        seen.push(id);
+    }
+    (1..=50).contains(&seen.len())
+}
+
+/// The three stream requests `inoreader-client` makes, one per part of a sync.
+const INOREADER_CLIENT_URLS: [&str; 3] = [
+    "https://www.inoreader.com/reader/api/0/stream/contents/user/-/state/com.google/reading-list?n=30&xt=user/-/state/com.google/read&output=json",
+    "https://www.inoreader.com/reader/api/0/stream/contents/user/-/state/com.google/starred?n=15&output=json",
+    "https://www.inoreader.com/reader/api/0/stream/contents/user/-/state/com.google/read?n=15&output=json",
+];
 
 #[allow(
     clippy::too_many_lines,
@@ -932,6 +1006,210 @@ mod tests {
             "https://lichess.org/api/token",
             CredentialUse::Fetch
         ));
+    }
+
+    const INOREADER_UNREAD: &str = "https://www.inoreader.com/reader/api/0/stream/contents/user/-/state/com.google/reading-list?n=30&xt=user/-/state/com.google/read&output=json";
+    const INOREADER_EDIT: &str = "https://www.inoreader.com/reader/api/0/edit-tag";
+    const FORM: &str = "application/x-www-form-urlencoded";
+
+    fn inoreader(
+        credential: &Credential,
+        url: &str,
+        usage: CredentialUse,
+        body: Option<&str>,
+        content_type: Option<&str>,
+    ) -> bool {
+        allowed_request(
+            "inoreader-client",
+            credential,
+            url,
+            usage,
+            body,
+            content_type,
+        )
+    }
+
+    #[test]
+    fn inoreader_client_reads_three_streams_and_posts_one_checked_body() {
+        let token = Credential::bearer("inoreader");
+        for url in [
+            INOREADER_UNREAD,
+            "https://www.inoreader.com/reader/api/0/stream/contents/user/-/state/com.google/starred?n=15&output=json",
+            "https://www.inoreader.com/reader/api/0/stream/contents/user/-/state/com.google/read?n=15&output=json",
+        ] {
+            assert!(inoreader(&token, url, CredentialUse::Fetch, None, None), "{url}");
+        }
+        for body in [
+            "a=user/-/state/com.google/read&i=7",
+            "r=user/-/state/com.google/read&i=7&i=9",
+            "a=user/-/state/com.google/starred&i=50644615003",
+            "r=user/-/state/com.google/starred&i=1&i=2&i=3",
+        ] {
+            assert!(
+                inoreader(
+                    &token,
+                    INOREADER_EDIT,
+                    CredentialUse::Post,
+                    Some(body),
+                    Some(FORM)
+                ),
+                "{body}"
+            );
+        }
+        let fifty = (1..=50).fold(
+            "a=user/-/state/com.google/read".to_owned(),
+            |mut body, id| {
+                body.push_str("&i=");
+                body.push_str(&id.to_string());
+                body
+            },
+        );
+        assert!(inoreader(
+            &token,
+            INOREADER_EDIT,
+            CredentialUse::Post,
+            Some(&fifty),
+            Some(FORM)
+        ));
+    }
+
+    #[test]
+    fn inoreader_client_refuses_every_other_write() {
+        let token = Credential::bearer("inoreader");
+        let read = "a=user/-/state/com.google/read&i=7";
+        let post = |url: &str, body: &str, content_type: &str| {
+            inoreader(
+                &token,
+                url,
+                CredentialUse::Post,
+                Some(body),
+                Some(content_type),
+            )
+        };
+        assert!(post(INOREADER_EDIT, read, FORM), "the control failed");
+        assert!(
+            !post(INOREADER_EDIT, read, "application/json"),
+            "JSON accepted"
+        );
+        for (body, why) in [
+            ("a=user/-/label/Tech&i=7", "another tag"),
+            ("a=user/-/state/com.google/read&i=7a", "a letter in an id"),
+            ("a=user/-/state/com.google/read&i=", "an empty id"),
+            ("a=user/-/state/com.google/read&i=0", "an id of zero"),
+            (
+                "a=user/-/state/com.google/read&i=12345678901234567",
+                "a 17 digit id",
+            ),
+            ("a=user/-/state/com.google/read&i=7&i=7", "a duplicate id"),
+            ("a=user/-/state/com.google/read", "no ids"),
+            ("a=user/-/state/com.google/read&i=7&x=1", "an extra field"),
+            ("i=7&a=user/-/state/com.google/read", "the tag not first"),
+            (
+                "a=user/-/state/com.google/read&r=user/-/state/com.google/starred&i=7",
+                "two tags",
+            ),
+            ("", "an empty body"),
+        ] {
+            assert!(!post(INOREADER_EDIT, body, FORM), "{why}");
+        }
+        let many = (1..=51).fold(
+            "a=user/-/state/com.google/read".to_owned(),
+            |mut body, id| {
+                body.push_str("&i=");
+                body.push_str(&id.to_string());
+                body
+            },
+        );
+        assert!(!post(INOREADER_EDIT, &many, FORM), "51 ids accepted");
+        assert!(
+            !post(&format!("{INOREADER_EDIT}?x=1"), read, FORM),
+            "a query string on edit-tag was accepted"
+        );
+        assert!(!post(INOREADER_UNREAD, read, FORM), "a POST to a stream");
+        assert!(
+            !inoreader(
+                &token,
+                INOREADER_UNREAD,
+                CredentialUse::Fetch,
+                Some(read),
+                None
+            ),
+            "a fetch with a body"
+        );
+        assert!(
+            !inoreader(&token, INOREADER_EDIT, CredentialUse::Fetch, None, None),
+            "a fetch of edit-tag"
+        );
+        for usage in [CredentialUse::Put, CredentialUse::Patch] {
+            assert!(!inoreader(
+                &token,
+                INOREADER_EDIT,
+                usage,
+                Some(read),
+                Some(FORM)
+            ));
+        }
+        assert!(!inoreader(
+            &Credential::bearer("other"),
+            INOREADER_EDIT,
+            CredentialUse::Post,
+            Some(read),
+            Some(FORM)
+        ));
+        assert!(!inoreader(
+            &Credential::in_header("inoreader", "Authorization"),
+            INOREADER_EDIT,
+            CredentialUse::Post,
+            Some(read),
+            Some(FORM)
+        ));
+        assert!(!inoreader(
+            &token,
+            "https://www.inoreader.com.attacker.invalid/reader/api/0/edit-tag",
+            CredentialUse::Post,
+            Some(read),
+            Some(FORM)
+        ));
+    }
+
+    #[test]
+    fn inoreader_client_may_only_read_its_three_streams_with_its_own_bearer_secret() {
+        let token = Credential::bearer("inoreader");
+        let unread = INOREADER_UNREAD;
+        assert!(!allowed(
+            "inoreader-client",
+            &Credential::bearer("other"),
+            unread,
+            CredentialUse::Fetch
+        ));
+        assert!(!allowed(
+            "inoreader-client",
+            &Credential::in_header("inoreader", "Authorization"),
+            unread,
+            CredentialUse::Fetch
+        ));
+        assert!(!allowed(
+            "inoreader-client",
+            &token,
+            "https://www.inoreader.com/reader/api/0/subscription/list",
+            CredentialUse::Fetch
+        ));
+        assert!(!allowed(
+            "inoreader-client",
+            &token,
+            "https://www.inoreader.com.attacker.invalid/reader/api/0/stream/contents/user/-/state/com.google/reading-list?n=30&xt=user/-/state/com.google/read&output=json",
+            CredentialUse::Fetch
+        ));
+        for url in [
+            "https://www.inoreader.com/reader/api/0/unread-count?output=json",
+            "https://www.inoreader.com/reader/api/0/stream/contents/user/-/state/com.google/reading-list?n=100&xt=user/-/state/com.google/read&output=json",
+            "https://www.inoreader.com/reader/api/0/stream/contents/user/-/state/com.google/reading-list?n=30&output=json",
+            "https://www.inoreader.com/reader/api/0/stream/contents/user/-/state/com.google/starred?n=100&output=json",
+            "https://www.inoreader.com/reader/api/0/stream/contents/feed/https://example.com/rss?n=15&output=json",
+            "https://www.inoreader.com/reader/api/0/stream/contents/user%2F-%2Fstate%2Fcom.google%2Freading-list?n=30&xt=user/-/state/com.google/read&output=json",
+        ] {
+            assert!(!allowed("inoreader-client", &token, url, CredentialUse::Fetch), "{url}");
+        }
     }
 
     #[test]

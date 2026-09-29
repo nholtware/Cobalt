@@ -1173,6 +1173,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "kobo-inoreader-client"
+version = "0.3.15"
+dependencies = [
+ "kobo-bookview",
+ "kobo-doc",
+ "kobo-image",
+ "kobo-json",
+ "kobo-net",
+ "kobo-read",
+ "kobo-sdk",
+ "kobo-ui",
+]
+
+[[package]]
 name = "kobo-json"
 version = "0.3.15"
 

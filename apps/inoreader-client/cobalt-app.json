@@ -1,0 +1,19 @@
+{
+  "id": "inoreader-client",
+  "display_name": "Inoreader",
+  "short_label": "Inoreader",
+  "summary": "Read your Inoreader feeds on your Kobo.",
+  "page_description": "Bring unread Inoreader articles to your Kobo, read them without Wi-Fi, and send your read marks and stars back when it returns.",
+  "version": "1.0.0",
+  "release_notes": "Initial release: unread, starred and recently read articles saved for offline reading; read marks and stars queued while offline.",
+  "glyph": "rss",
+  "capabilities": ["network"],
+  "setup": {
+    "steps": [
+      { "text": "In Inoreader, open Preferences, Developer, and create an application with scope read and write. Keep its App ID and App Key on your computer only." },
+      { "text": "On your computer, mint a token once with the app's script; it prints a consent page to open and stores the token under ~/.config/cobalt/secrets.", "command": "apps/inoreader-client/tools/token.sh url" },
+      { "text": "Install the token under the exact name inoreader; the runtime sends it as an Authorization: Bearer header.", "command": "kobo secret set inoreader --device <address>" },
+      { "text": "Tokens expire. When the app says Inoreader rejected the token, refresh and install again from your computer.", "command": "apps/inoreader-client/tools/token.sh refresh" }
+    ]
+  }
+}

@@ -68,6 +68,7 @@ members = [
     "apps/habits",
     "apps/homepanel",
     "apps/inkling",
+    "apps/inoreader-client",
     "apps/kitchencard",
     "apps/lichess",
     "apps/logicpack",

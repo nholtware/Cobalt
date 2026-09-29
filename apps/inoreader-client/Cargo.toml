@@ -1,0 +1,22 @@
+[package]
+name = "kobo-inoreader-client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+kobo-sdk = { path = "../../crates/kobo-sdk" }
+kobo-json = { path = "../../crates/kobo-json" }
+kobo-bookview = { path = "../../crates/kobo-bookview" }
+kobo-doc = { path = "../../crates/kobo-doc" }
+kobo-read = { path = "../../crates/kobo-read" }
+kobo-net = { path = "../../crates/kobo-net" }
+
+[dev-dependencies]
+kobo-image = { path = "../../crates/kobo-image" }
+kobo-ui = { path = "../../crates/kobo-ui" }
+
+[lints]
+workspace = true

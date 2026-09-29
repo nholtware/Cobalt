@@ -1,0 +1,1 @@
+- `setup.png`: first run with no credential installed, Sync tapped. Clara BW, ideal, no residue, 2026-09-28, no scenario.

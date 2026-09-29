@@ -1,0 +1,7 @@
+wait 800
+expect No unread articles
+tap-at 975 108
+wait-idle
+expect No credential named inoreader
+clean
+shot inoreader-client-setup
