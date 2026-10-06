@@ -109,6 +109,7 @@ const STORE_PACKAGES: &[&str] = &[
     "kobo-hn",
     "kobo-homepanel",
     "kobo-inkling",
+    "kobo-inoreader-client",
     "kobo-kitchencard",
     "kobo-lichess",
     "kobo-logicpack",
